@@ -756,6 +756,7 @@ RenderDoc::RenderDoc()
 //  ProcessConfig();
 //}
 
+//------------------------------Start of new code------------------------------
 void RenderDoc::Initialise()
 {
   Callstack::Init();
@@ -839,7 +840,7 @@ void RenderDoc::Initialise()
 
   ProcessConfig();
 }
-
+//--------------------------------End of new code------------------------------
 
 RenderDoc::~RenderDoc()
 {

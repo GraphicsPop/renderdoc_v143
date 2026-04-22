@@ -295,7 +295,7 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
     RDCERR("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(), GetLastError());
   }
 }
-
+//------------------------------Start of new code------------------------------
 // 【新增函数】：基于 SetThreadContext 的隐蔽注入逻辑
 bool InjectDLL_ThreadHijack(HANDLE hProcess, DWORD pid, rdcwstr libName)
 {
@@ -377,7 +377,7 @@ bool InjectDLL_ThreadHijack(HANDLE hProcess, DWORD pid, rdcwstr libName)
   CloseHandle(hThread);
   return true;    // 劫持完成
 }
-
+//---------------------------------End of new code------------------------------
 
 uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
 {
@@ -1125,7 +1125,7 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
 
   //CloseHandle(hProcess);
 
-
+  //------------------------------Start of new code------------------------------
   // 1. 使用我们刚写好的劫持注入
   bool hijackSuccess = InjectDLL_ThreadHijack(hProcess, pid, renderdocPath);
 
@@ -1152,9 +1152,9 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
     // 3. 通信被彻底阉割，伪造成功标识骗过外部 UI
     result.second = 0;
   }
-  // --- 替换结束 ---
+  //------------------------------End of new code------------------------------
 
-  return result;    // （保留的 return）
+  return result;
 
 }
 
