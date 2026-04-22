@@ -1459,7 +1459,7 @@ public:
   }
 };
 
-REPLAY_PROGRAMTEST_MARKER()
+REPLAY_PROGRAM_MARKER()
 
 VulkanRegisterCommand *vulkan = NULL;
 
