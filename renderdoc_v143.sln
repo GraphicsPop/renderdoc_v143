@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 18
+VisualStudioVersion = 18.4.11620.152 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "UI", "UI", "{89059266-9C4E-4637-AB1D-BFF1DC15096B}"
 EndProject
@@ -73,7 +73,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "qrenderdoc_module", "qrende
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "version", "renderdoc\renderdoc_version.vcxproj", "{257FD75C-4D17-4A23-A754-23BFD85887A0}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "renderdocui_stub", "qrenderdoc\renderdocui_stub.vcxproj", "{37955C79-D91D-423F-8C6C-8F5BCF4F28D4}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "rendertestui_stub", "qrenderdoc\renderdocui_stub.vcxproj", "{37955C79-D91D-423F-8C6C-8F5BCF4F28D4}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NV", "renderdoc\driver\ihv\nv\NV.vcxproj", "{40349AD9-5558-4DF4-84E2-11934DE90A11}"
 EndProject

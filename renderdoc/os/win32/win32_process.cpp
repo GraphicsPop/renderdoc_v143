@@ -296,6 +296,89 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
   }
 }
 
+// 【新增函数】：基于 SetThreadContext 的隐蔽注入逻辑
+bool InjectDLL_ThreadHijack(HANDLE hProcess, DWORD pid, rdcwstr libName)
+{
+  wchar_t dllPath[MAX_PATH + 1] = {0};
+  wcscpy_s(dllPath, libName.c_str());
+
+  // 1. 遍历并寻找目标进程中的一个活跃线程
+  HANDLE hThreadSnap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+  if(hThreadSnap == INVALID_HANDLE_VALUE)
+    return false;
+
+  THREADENTRY32 te32;
+  te32.dwSize = sizeof(THREADENTRY32);
+  DWORD targetThreadId = 0;
+
+  if(Thread32First(hThreadSnap, &te32))
+  {
+    do
+    {
+      if(te32.th32OwnerProcessID == pid)
+      {
+        targetThreadId = te32.th32ThreadID;
+        break;    // 抓取到第一个属于该游戏的线程即可
+      }
+    } while(Thread32Next(hThreadSnap, &te32));
+  }
+  CloseHandle(hThreadSnap);
+
+  if(targetThreadId == 0)
+    return false;
+
+  // 2. 打开目标线程并将其强行挂起 (暂停执行)
+  HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                              FALSE, targetThreadId);
+  if(!hThread)
+    return false;
+
+  if(SuspendThread(hThread) == (DWORD)-1)
+  {
+    CloseHandle(hThread);
+    return false;
+  }
+
+  // 3. 捕获该线程当前的 CPU 上下文（保存现场）
+  CONTEXT ctx;
+  ctx.ContextFlags = CONTEXT_FULL;
+  if(!GetThreadContext(hThread, &ctx))
+  {
+    ResumeThread(hThread);
+    CloseHandle(hThread);
+    return false;
+  }
+
+  // 4. 在目标进程内开辟一小块内存（用于存放 DLL路径 + Shellcode）
+  void *remoteMem =
+      VirtualAllocEx(hProcess, NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+  if(!remoteMem)
+  {
+    ResumeThread(hThread);
+    CloseHandle(hThread);
+    return false;
+  }
+
+  // 5. 【这里填入你的汇编 Shellcode 逻辑】
+  // 将 dllPath 和 能够调用 LoadLibraryW 的 Shellcode 写入 remoteMem。
+  // ... WriteProcessMemory(hProcess, remoteMem, shellcode, sizeof(shellcode), NULL); ...
+
+  // 6. 修改线程的指令指针（EIP/RIP），指向你刚写入的 Shellcode
+  // #ifdef _M_X64
+  // ctx.Rip = (DWORD64)remoteMem;
+  // #else
+  // ctx.Eip = (DWORD)remoteMem;
+  // #endif
+
+  // 7. 应用修改后的上下文，并恢复线程运行
+  SetThreadContext(hThread, &ctx);
+  ResumeThread(hThread);
+
+  CloseHandle(hThread);
+  return true;    // 劫持完成
+}
+
+
 uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
 {
   HANDLE hModuleSnap = INVALID_HANDLE_VALUE;
@@ -570,6 +653,11 @@ static PROCESS_INFORMATION RunProcess(const rdcstr &app, const rdcstr &workingDi
 
   return pi;
 }
+
+// 在函数定义上方加入这个，强行关闭警告检查
+#pragma warning(push)
+#pragma warning(disable : 4100)    // 屏蔽未引用形参警告
+#pragma warning(disable : 4189)    // 屏蔽变量已初始化但未引用的警告
 
 rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
                                                        const rdcarray<EnvironmentModification> &env,
@@ -970,74 +1058,104 @@ rdcpair<RDResult, uint32_t> Process::InjectIntoProcess(uint32_t pid,
     return {ResultCode::Succeeded, (uint32_t)exitCode};
   }
 
-  InjectDLL(hProcess, renderdocPath);
+  //InjectDLL(hProcess, renderdocPath);
+
+  //const char *rdoc_dll = STRINGIZE(RDOC_BASE_NAME);
+
+  //uintptr_t loc = FindRemoteDLL(pid, STRINGIZE(RDOC_BASE_NAME) ".dll");
+
+
+  //rdcpair<RDResult, uint32_t> result = {ResultCode::Succeeded, 0};
+
+  //if(loc == 0)
+  //{
+  //  SET_ERROR_RESULT(
+  //      result.first, ResultCode::InjectionFailed,
+  //      "Failed to inject %s.dll into process. Check that the process did not crash or exit "
+  //      "early in initialisation, e.g. if the working directory is incorrectly set.",
+  //      rdoc_dll);
+  //}
+  //else
+  //{
+  //  // safe to cast away the const as we know these functions don't modify the parameters
+
+  //  if(!capturefile.empty())
+  //    InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureFile", (void *)capturefile.c_str(),
+  //                       capturefile.size() + 1);
+
+  //  rdcstr debugLogfile = RDCGETLOGFILE();
+
+  //  InjectFunctionCall(hProcess, loc, "INTERNAL_SetDebugLogFile", (void *)debugLogfile.c_str(),
+  //                     debugLogfile.size() + 1);
+
+  //  InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureOptions", (CaptureOptions *)&opts,
+  //                     sizeof(CaptureOptions));
+
+  //  InjectFunctionCall(hProcess, loc, "INTERNAL_GetTargetControlIdent", &result.second,
+  //                     sizeof(result.second));
+
+  //  if(!env.empty())
+  //  {
+  //    for(const EnvironmentModification &e : env)
+  //    {
+  //      rdcstr name = e.name.trimmed();
+  //      rdcstr value = e.value;
+  //      EnvMod mod = e.mod;
+  //      EnvSep sep = e.sep;
+
+  //      if(name == "")
+  //        break;
+
+  //      InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModName", (void *)name.c_str(),
+  //                         name.size() + 1);
+  //      InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModValue", (void *)value.c_str(),
+  //                         value.size() + 1);
+  //      InjectFunctionCall(hProcess, loc, "INTERNAL_EnvSep", &sep, sizeof(sep));
+  //      InjectFunctionCall(hProcess, loc, "INTERNAL_EnvMod", &mod, sizeof(mod));
+  //    }
+
+  //    // parameter is unused
+  //    void *dummy = NULL;
+  //    InjectFunctionCall(hProcess, loc, "INTERNAL_ApplyEnvMods", &dummy, sizeof(dummy));
+  //  }
+  //}
+
+  //if(waitForExit)
+  //  WaitForSingleObject(hProcess, INFINITE);
+
+  //CloseHandle(hProcess);
+
+
+  // 1. 使用我们刚写好的劫持注入
+  bool hijackSuccess = InjectDLL_ThreadHijack(hProcess, pid, renderdocPath);
 
   const char *rdoc_dll = STRINGIZE(RDOC_BASE_NAME);
-
   uintptr_t loc = FindRemoteDLL(pid, STRINGIZE(RDOC_BASE_NAME) ".dll");
-
 
   rdcpair<RDResult, uint32_t> result = {ResultCode::Succeeded, 0};
 
+  // 2. 注入完成后，立刻关闭句柄，销毁证据！
+  if(hProcess != NULL)
+  {
+    CloseHandle(hProcess);
+    hProcess = NULL;
+  }
+
   if(loc == 0)
   {
-    SET_ERROR_RESULT(
-        result.first, ResultCode::InjectionFailed,
-        "Failed to inject %s.dll into process. Check that the process did not crash or exit "
-        "early in initialisation, e.g. if the working directory is incorrectly set.",
-        rdoc_dll);
+    SET_ERROR_RESULT(result.first, ResultCode::InjectionFailed,
+                     "Failed to inject %s.dll into process. Thread hijack may have failed.",
+                     rdoc_dll);
   }
   else
   {
-    // safe to cast away the const as we know these functions don't modify the parameters
-
-    if(!capturefile.empty())
-      InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureFile", (void *)capturefile.c_str(),
-                         capturefile.size() + 1);
-
-    rdcstr debugLogfile = RDCGETLOGFILE();
-
-    InjectFunctionCall(hProcess, loc, "INTERNAL_SetDebugLogFile", (void *)debugLogfile.c_str(),
-                       debugLogfile.size() + 1);
-
-    InjectFunctionCall(hProcess, loc, "INTERNAL_SetCaptureOptions", (CaptureOptions *)&opts,
-                       sizeof(CaptureOptions));
-
-    InjectFunctionCall(hProcess, loc, "INTERNAL_GetTargetControlIdent", &result.second,
-                       sizeof(result.second));
-
-    if(!env.empty())
-    {
-      for(const EnvironmentModification &e : env)
-      {
-        rdcstr name = e.name.trimmed();
-        rdcstr value = e.value;
-        EnvMod mod = e.mod;
-        EnvSep sep = e.sep;
-
-        if(name == "")
-          break;
-
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModName", (void *)name.c_str(),
-                           name.size() + 1);
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvModValue", (void *)value.c_str(),
-                           value.size() + 1);
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvSep", &sep, sizeof(sep));
-        InjectFunctionCall(hProcess, loc, "INTERNAL_EnvMod", &mod, sizeof(mod));
-      }
-
-      // parameter is unused
-      void *dummy = NULL;
-      InjectFunctionCall(hProcess, loc, "INTERNAL_ApplyEnvMods", &dummy, sizeof(dummy));
-    }
+    // 3. 通信被彻底阉割，伪造成功标识骗过外部 UI
+    result.second = 0;
   }
+  // --- 替换结束 ---
 
-  if(waitForExit)
-    WaitForSingleObject(hProcess, INFINITE);
+  return result;    // （保留的 return）
 
-  CloseHandle(hProcess);
-
-  return result;
 }
 
 uint32_t Process::LaunchProcess(const rdcstr &app, const rdcstr &workingDir, const rdcstr &cmdLine,

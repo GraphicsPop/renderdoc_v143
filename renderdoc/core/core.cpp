@@ -629,12 +629,137 @@ RenderDoc::RenderDoc()
   ClearTrackedFiles();
 }
 
+// 新增：因为失去了注入器的外部参数，DLL 必须在此自行设定工作参数 下方新增了一个新的 Initialise()
+// 函数，覆盖原本的初始化逻辑，强制设定工作参数，并屏蔽日志输出。
+//void RenderDoc::Initialise()
+//{
+//  Callstack::Init();
+//
+//  Network::Init();
+//
+//  Threading::Init();
+//
+//#if !RENDERDOC_STABLE_BUILD
+//  Superluminal::Init();
+//#endif
+//
+//  m_RemoteIdent = 0;
+//  m_RemoteThread = 0;
+//
+//  m_TimeBase = 0;
+//  m_TimeFrequency = 1.0;
+//
+//  if(!IsReplayApp())
+//  {
+//    m_TimeBase = Timing::GetTick();
+//    m_TimeFrequency = Timing::GetTickFrequency() / 1000.0;
+//
+//    Process::ApplyEnvironmentModification();
+//
+//    uint32_t port = RenderDoc_FirstTargetControlPort;
+//
+//    Network::Socket *sock = Network::CreateServerSocket("0.0.0.0", port & 0xffff, 4);
+//
+//    while(sock == NULL)
+//    {
+//      port++;
+//      if(port > RenderDoc_LastTargetControlPort)
+//      {
+//        m_RemoteIdent = 0;
+//        break;
+//      }
+//
+//      sock = Network::CreateServerSocket("0.0.0.0", port & 0xffff, 4);
+//    }
+//
+//    if(sock)
+//    {
+//      m_RemoteIdent = port;
+//
+//      m_TargetControlThreadShutdown = false;
+//      m_RemoteThread = Threading::CreateThread([sock]() { TargetControlServerThread(sock); });
+//
+//      RDCLOG("Listening for target control on %u", port);
+//    }
+//    else
+//    {
+//      RDCWARN("Couldn't open socket for target control");
+//    }
+//  }
+//
+//  // set default capture log - useful for when hooks aren't setup
+//  // through the UI (and a log file isn't set manually)
+//  {
+//    rdcstr capture_filename;
+//
+//    const rdcstr base = IsReplayApp() ? "RenderDoc" : "RenderDoc_app";
+//
+//    FileIO::GetDefaultFiles(base, capture_filename, m_LoggingFilename, m_Target);
+//
+//    if(m_CaptureFileTemplate.empty())
+//      SetCaptureFileTemplate(capture_filename);
+//
+//    RDCLOGFILE(m_LoggingFilename.c_str());
+//  }
+//
+//  const char *platform =
+//#if ENABLED(RDOC_WIN32)
+//      "Windows";
+//#elif ENABLED(RDOC_LINUX)
+//      "Linux";
+//#elif ENABLED(RDOC_ANDROID)
+//      "Android";
+//#elif ENABLED(RDOC_APPLE)
+//      "macOS";
+//#else
+//      "Unknown";
+//#endif
+//
+//  RDCLOG("RenderDoc v%s %s %s %s (%s) %s", MAJOR_MINOR_VERSION_STRING, platform,
+//         sizeof(uintptr_t) == sizeof(uint64_t) ? "64-bit" : "32-bit",
+//         ENABLED(RDOC_RELEASE) ? "Release" : "Development", GitVersionHash,
+//         IsReplayApp() ? "loaded in replay application" : "capturing application");
+//
+//#if defined(DISTRIBUTION_VERSION)
+//  RDCLOG("Packaged for %s (%s) - %s", DISTRIBUTION_NAME, DISTRIBUTION_VERSION, DISTRIBUTION_CONTACT);
+//#endif
+//
+//#if defined(RENDERDOC_HOOK_DLSYM)
+//  RDCWARN("dlsym() hooking enabled!");
+//#endif
+//
+//  if(!IsReplayApp())
+//  {
+//    if(m_RemoteIdent == 0)
+//      RDCWARN("Couldn't open socket for target control");
+//    else
+//      RDCDEBUG("Listening for target control on %u", m_RemoteIdent);
+//  }
+//
+//  Keyboard::Init();
+//
+//  m_FrameTimer.InitTimers();
+//
+//  m_ExHandler = NULL;
+//
+//  ClearTrackedFiles();
+//
+//  RecreateCrashHandler();
+//
+//  // begin printing to stdout/stderr after this point, earlier logging is debugging
+//  // cruft that we don't want cluttering output.
+//  // However we don't want to print in captured applications, since they may be outputting important
+//  // information to stdout/stderr and being piped around and processed!
+//  if(IsReplayApp())
+//    RDCLOGOUTPUT();
+//
+//  ProcessConfig();
+//}
+
 void RenderDoc::Initialise()
 {
   Callstack::Init();
-
   Network::Init();
-
   Threading::Init();
 
 #if !RENDERDOC_STABLE_BUILD
@@ -643,7 +768,6 @@ void RenderDoc::Initialise()
 
   m_RemoteIdent = 0;
   m_RemoteThread = 0;
-
   m_TimeBase = 0;
   m_TimeFrequency = 1.0;
 
@@ -654,42 +778,37 @@ void RenderDoc::Initialise()
 
     Process::ApplyEnvironmentModification();
 
+    // =========================================================================
+    // 【魔改重点 1】：强行硬编码抓帧路径与参数
+    // 因为外部注入器已经关闭了句柄，无法通过 InjectFunctionCall 传参，所以必须在这里写死
+    // =========================================================================
+    m_CaptureFileTemplate = "D:\\MyCaptures\\GameFrame";    // 请确保该文件夹已手动创建
+
+    m_Options.allowVSync = true;
+    m_Options.allowFullscreen = true;
+    m_Options.apiValidation = false;    // 关闭验证，减少被检测风险
+    m_Options.captureAllCmdLists = true;
+    m_Options.hookIntoChildren = false;    // 建议关闭，防止递归注入导致某些保护组件报警
+    m_Options.refAllResources = true;
+
+    // =========================================================================
+    // 【魔改重点 2】：彻底禁用网络监听（TargetControlSocket）
+    // 原版代码会循环尝试开启 38920-38927 端口进行监听，这是反作弊系统最容易扫描的静态特征。
+    // 我们直接跳过这部分逻辑，让 m_RemoteIdent 保持为 0。
+    // =========================================================================
+    /* --- 原版网络监听逻辑已屏蔽 ---
     uint32_t port = RenderDoc_FirstTargetControlPort;
-
     Network::Socket *sock = Network::CreateServerSocket("0.0.0.0", port & 0xffff, 4);
+    ... (此处代码省略) ...
+    --- 屏蔽结束 --- */
 
-    while(sock == NULL)
-    {
-      port++;
-      if(port > RenderDoc_LastTargetControlPort)
-      {
-        m_RemoteIdent = 0;
-        break;
-      }
-
-      sock = Network::CreateServerSocket("0.0.0.0", port & 0xffff, 4);
-    }
-
-    if(sock)
-    {
-      m_RemoteIdent = port;
-
-      m_TargetControlThreadShutdown = false;
-      m_RemoteThread = Threading::CreateThread([sock]() { TargetControlServerThread(sock); });
-
-      RDCLOG("Listening for target control on %u", port);
-    }
-    else
-    {
-      RDCWARN("Couldn't open socket for target control");
-    }
+    m_RemoteIdent = 0;    // 显式声明不开启远程控制端口
+    RDCLOG("Stealth Mode: Target control socket disabled to avoid detection.");
   }
 
-  // set default capture log - useful for when hooks aren't setup
-  // through the UI (and a log file isn't set manually)
+  // 设置默认路径（这部分保留，但由于上面写死了模板，m_CaptureFileTemplate 不会为空）
   {
     rdcstr capture_filename;
-
     const rdcstr base = IsReplayApp() ? "RenderDoc" : "RenderDoc_app";
 
     FileIO::GetDefaultFiles(base, capture_filename, m_LoggingFilename, m_Target);
@@ -697,62 +816,30 @@ void RenderDoc::Initialise()
     if(m_CaptureFileTemplate.empty())
       SetCaptureFileTemplate(capture_filename);
 
-    RDCLOGFILE(m_LoggingFilename.c_str());
+    // RDCLOGFILE(m_LoggingFilename.c_str()); // 可选：注释掉以减少日志文件产生
   }
 
-  const char *platform =
-#if ENABLED(RDOC_WIN32)
-      "Windows";
-#elif ENABLED(RDOC_LINUX)
-      "Linux";
-#elif ENABLED(RDOC_ANDROID)
-      "Android";
-#elif ENABLED(RDOC_APPLE)
-      "macOS";
-#else
-      "Unknown";
-#endif
-
-  RDCLOG("RenderDoc v%s %s %s %s (%s) %s", MAJOR_MINOR_VERSION_STRING, platform,
-         sizeof(uintptr_t) == sizeof(uint64_t) ? "64-bit" : "32-bit",
-         ENABLED(RDOC_RELEASE) ? "Release" : "Development", GitVersionHash,
-         IsReplayApp() ? "loaded in replay application" : "capturing application");
-
-#if defined(DISTRIBUTION_VERSION)
-  RDCLOG("Packaged for %s (%s) - %s", DISTRIBUTION_NAME, DISTRIBUTION_VERSION, DISTRIBUTION_CONTACT);
-#endif
-
-#if defined(RENDERDOC_HOOK_DLSYM)
-  RDCWARN("dlsym() hooking enabled!");
-#endif
+  // 日志输出版本信息（保留用于确认 DLL 是否成功加载）
+  RDCLOG("RenderDoc v%s Stealth-Build Initialised", MAJOR_MINOR_VERSION_STRING);
 
   if(!IsReplayApp())
   {
-    if(m_RemoteIdent == 0)
-      RDCWARN("Couldn't open socket for target control");
-    else
-      RDCDEBUG("Listening for target control on %u", m_RemoteIdent);
+    // 既然不打算开启监听，我们就不再警告 socket 错误
+    // if(m_RemoteIdent == 0) RDCWARN("Couldn't open socket for target control");
   }
 
   Keyboard::Init();
-
   m_FrameTimer.InitTimers();
-
   m_ExHandler = NULL;
-
   ClearTrackedFiles();
-
   RecreateCrashHandler();
 
-  // begin printing to stdout/stderr after this point, earlier logging is debugging
-  // cruft that we don't want cluttering output.
-  // However we don't want to print in captured applications, since they may be outputting important
-  // information to stdout/stderr and being piped around and processed!
   if(IsReplayApp())
     RDCLOGOUTPUT();
 
   ProcessConfig();
 }
+
 
 RenderDoc::~RenderDoc()
 {
