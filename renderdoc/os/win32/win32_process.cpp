@@ -24,7 +24,7 @@
  ******************************************************************************/
 
 // must be separate so that it's included first and not sorted by clang-format
-#include <windows.h>
+#include <windows.h> 
 
 #include <Psapi.h>
 #include <tchar.h>
